@@ -16,58 +16,38 @@ const MOCK_RESULT: AnalysisResult = {
   pages: 5,
 }
 
-const THEME = {
-  rose: {
-    track: 'bg-rose-100',
-    fill: 'bg-gradient-to-r from-rose-400 to-rose-500',
-    text: 'text-rose-900',
-    button: 'bg-rose-500 hover:bg-rose-600 shadow-rose-200',
-  },
-  indigo: {
-    track: 'bg-indigo-100',
-    fill: 'bg-gradient-to-r from-indigo-400 to-indigo-500',
-    text: 'text-indigo-900',
-    button: 'bg-indigo-500 hover:bg-indigo-600 shadow-indigo-200',
-  },
-} as const
+const STEPS = [
+  { title: 'Cargar archivos', description: 'Arrastra o selecciona PDFs' },
+  { title: 'Procesar', description: 'Extracción de texto' },
+  { title: 'Resultados', description: 'Ver clasificaciones' },
+] as const
 
-function ProgressBar({ percent, color }: { percent: number; color: keyof typeof THEME }) {
-  const t = THEME[color]
-  return (
-    <div className={`relative h-11 w-full overflow-hidden rounded-full ${t.track}`}>
-      <div
-        className={`h-full ${t.fill} transition-all duration-500 ease-out`}
-        style={{ width: `${percent}%` }}
-      />
-      <span className={`absolute inset-0 flex items-center pl-4 text-sm font-semibold ${t.text}`}>
-        {percent}%
-      </span>
-    </div>
-  )
-}
-
-function ActionButton({
-  label,
-  color,
-  disabled,
-  onClick,
+function StepItem({
+  number,
+  title,
+  description,
+  active,
+  done,
 }: {
-  label: string
-  color: keyof typeof THEME
-  disabled: boolean
-  onClick: () => void
+  number: number
+  title: string
+  description: string
+  active: boolean
+  done: boolean
 }) {
-  const t = THEME[color]
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-40 rounded-full py-2 text-sm font-semibold text-white shadow-lg transition-all
-        ${disabled ? 'cursor-not-allowed bg-neutral-300 shadow-none' : `${t.button} hover:-translate-y-0.5 hover:shadow-xl`}`}
-    >
-      {label}
-    </button>
+    <div className="flex items-start gap-3">
+      <div
+        className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold transition-colors
+          ${active ? 'bg-[#FFD400] text-black' : done ? 'bg-[#FFD400]/30 text-[#FFD400]' : 'bg-neutral-700 text-neutral-400'}`}
+      >
+        {number}
+      </div>
+      <div>
+        <p className={`text-sm font-semibold ${active ? 'text-white' : 'text-neutral-400'}`}>{title}</p>
+        <p className="text-xs text-neutral-500">{description}</p>
+      </div>
+    </div>
   )
 }
 
@@ -78,12 +58,7 @@ function App() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     setFileName(file ? file.name : null)
-    setStage('idle')
-  }
-
-  const handleLoad = () => {
-    if (!fileName) return
-    setStage('loaded')
+    setStage(file ? 'loaded' : 'idle')
   }
 
   const handleAnalyze = () => {
@@ -91,61 +66,102 @@ function App() {
     setStage('analyzed')
   }
 
-  const loadPercent = stage === 'idle' ? 0 : 40
-  const analyzePercent = stage === 'analyzed' ? 40 : 0
+  const currentStep = stage === 'idle' ? 1 : stage === 'loaded' ? 2 : 3
+
+  const stats = [
+    { label: 'Archivos cargados', value: fileName ? 1 : 0 },
+    { label: 'Procesados', value: stage !== 'idle' ? 1 : 0 },
+    { label: 'Clasificados', value: stage === 'analyzed' ? 1 : 0 },
+  ]
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-indigo-50 to-rose-50 p-6">
-      <div className="w-full max-w-xl rounded-3xl bg-white p-8 shadow-2xl shadow-indigo-100 ring-1 ring-black/5">
-        <h1 className="mb-6 text-center text-lg font-bold text-neutral-800">
-          Clasificador de documentos PDF
-        </h1>
+    <div className="flex min-h-screen flex-col bg-neutral-950">
+      <header className="flex w-full items-center justify-between bg-[#FFD400] px-6 py-4">
+        <img src="/uniandes-logo.png" alt="Universidad de los Andes" className="h-14 w-auto" />
+        <p className="text-sm font-medium text-black">Clasificador de documentos</p>
+      </header>
 
-        <label
-          htmlFor="pdf-upload"
-          className="mb-6 flex h-16 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/50 px-4 text-center text-sm text-indigo-700 transition-colors hover:border-indigo-400 hover:bg-indigo-50"
-        >
-          <svg className="h-5 w-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0 4 4m-4-4-4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-          </svg>
-          <span className="font-medium">
-            {fileName ?? 'agregue los documentos pdf a analizar'}
-          </span>
-          <input
-            id="pdf-upload"
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-        </label>
+      <div className="flex flex-1">
+        <aside className="flex w-72 flex-shrink-0 flex-col justify-between border-r border-neutral-800 bg-neutral-900 p-6">
+          <div className="space-y-6">
+            {STEPS.map((step, i) => (
+              <StepItem
+                key={step.title}
+                number={i + 1}
+                title={step.title}
+                description={step.description}
+                active={currentStep === i + 1}
+                done={currentStep > i + 1}
+              />
+            ))}
+          </div>
 
-        <div className="mb-2 flex justify-center">
-          <ActionButton label="Load" color="rose" disabled={!fileName} onClick={handleLoad} />
-        </div>
-        <div className="mb-6">
-          <ProgressBar percent={loadPercent} color="rose" />
-        </div>
+          <div className="space-y-1.5 border-t border-neutral-800 pt-4 text-sm">
+            {stats.map((s) => (
+              <div key={s.label} className="flex items-center justify-between">
+                <span className="text-neutral-400">{s.label}</span>
+                <span className="font-bold text-[#FFD400]">{s.value}</span>
+              </div>
+            ))}
+          </div>
+        </aside>
 
-        <div className="mb-2 flex justify-center">
-          <ActionButton label="Analizar" color="indigo" disabled={stage === 'idle'} onClick={handleAnalyze} />
-        </div>
-        <div className="mb-6">
-          <ProgressBar percent={analyzePercent} color="indigo" />
-        </div>
+        <main className="flex-1 p-8">
+          <h2 className="text-xl font-semibold text-white">Selecciona los documentos</h2>
+          <p className="mt-1 text-sm text-neutral-500">
+            Formatos aceptados: PDF · Tamaño máx. 20 MB por archivo
+          </p>
 
-        <div className="flex min-h-32 flex-col items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-6 text-center text-sm">
-          {stage === 'analyzed' ? (
-            <div className="space-y-1.5 font-medium text-neutral-700">
-              <p>{MOCK_RESULT.images} images</p>
-              <p>{MOCK_RESULT.paragraphs} parrafos</p>
-              <p>{MOCK_RESULT.unidentified} imagenes o textos sin identificar.</p>
-              <p>{MOCK_RESULT.pages} paginas.</p>
+          <label
+            htmlFor="pdf-upload"
+            className="mt-6 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-neutral-700 bg-neutral-900 px-8 py-16 text-center transition-colors hover:border-[#FFD400]/60"
+          >
+            <svg className="h-10 w-10 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-6 4h6M9 9h1M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+            </svg>
+            <p className="font-medium text-white">
+              {fileName ?? 'Arrastra documentos PDF aquí'}
+            </p>
+            <p className="text-sm text-neutral-500">
+              {fileName ? 'Archivo listo' : 'o haz clic para seleccionar'}
+            </p>
+            <input
+              id="pdf-upload"
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </label>
+
+          {fileName && stage !== 'analyzed' && (
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={handleAnalyze}
+                className="rounded-full bg-[#FFD400] px-6 py-2 text-sm font-semibold text-black shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl"
+              >
+                Analizar
+              </button>
             </div>
-          ) : (
-            <p className="text-neutral-400">Los resultados aparecerán aquí</p>
           )}
-        </div>
+
+          <div className="mt-8">
+            {stage === 'analyzed' ? (
+              <div className="mx-auto max-w-md space-y-1.5 rounded-2xl border border-neutral-800 bg-neutral-900 px-4 py-6 text-center text-sm font-medium text-neutral-300">
+                <p>{MOCK_RESULT.images} imágenes</p>
+                <p>{MOCK_RESULT.paragraphs} párrafos</p>
+                <p>{MOCK_RESULT.unidentified} imágenes o textos sin identificar.</p>
+                <p>{MOCK_RESULT.pages} páginas.</p>
+              </div>
+            ) : (
+              <p className="flex flex-col items-center gap-1 text-center text-blue-400">
+                <span aria-hidden className="animate-bounce text-xl">↑</span>
+                <span className="animate-pulse">Los archivos aparecerán aquí</span>
+              </p>
+            )}
+          </div>
+        </main>
       </div>
     </div>
   )
