@@ -1,13 +1,25 @@
 import { useState } from 'react'
 
-type Stage = 'idle' | 'loaded' | 'analyzed'
+type Stage = 'idle' | 'loaded' | 'analyzing' | 'analyzed'
 type Tab = 'ingresar' | 'resultado' | 'historial'
 
-interface HistoryEntry {
-  fileName: string
+const API_BASE_URL = 'http://localhost:8000'
+
+interface RankedPrediction {
+  label: number
   category: string
+  probability: number
+}
+
+interface PredictionResponse {
+  prediction_id: string
+  created_at: string
+  source_type: string
+  file_name: string | null
+  predicted_label: number
+  predicted_category: string
   confidence: number
-  timestamp: string
+  top_3: RankedPrediction[]
 }
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -24,20 +36,6 @@ const CATEGORY_ICONS: Record<string, string> = {
   Deportes: '⚽',
   Tecnología: '💻',
 }
-
-const MOCK_ANALYSIS = {
-  category: 'Medicina',
-  confidence: 68,
-  keywords: ['IA médica', 'MIT', 'cáncer de pulmón', 'diagnóstico', 'aprendizaje profundo'],
-  features: [
-    { label: 'Vocabulario biomédico', percent: 92 },
-    { label: 'Institución investigadora', percent: 78 },
-    { label: 'Método experimental', percent: 65 },
-    { label: 'Resultado cuantitativo', percent: 54 },
-  ],
-  reasoning:
-    'El texto contiene vocabulario específico del dominio biomédico (cáncer, radiólogos, imágenes médicas) y hace referencia a una institución de investigación (MIT) y una metodología (aprendizaje profundo). Un modelo supervisado identificaría estos patrones mediante embeddings entrenados con corpus científicos, asignando alta probabilidad al espacio vectorial de "Medicina".',
-} as const
 
 function ConfidenceGauge({ percent }: { percent: number }) {
   const radius = 42
@@ -70,30 +68,94 @@ function ConfidenceGauge({ percent }: { percent: number }) {
 }
 
 function App() {
-  const [fileName, setFileName] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null)
   const [stage, setStage] = useState<Stage>('idle')
   const [activeTab, setActiveTab] = useState<Tab>('ingresar')
-  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [result, setResult] = useState<PredictionResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [history, setHistory] = useState<PredictionResponse[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [clearingHistory, setClearingHistory] = useState(false)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    setFileName(file ? file.name : null)
-    setStage(file ? 'loaded' : 'idle')
+    const selected = e.target.files?.[0] ?? null
+    setFile(selected)
+    setStage(selected ? 'loaded' : 'idle')
+    setError(null)
   }
 
-  const handleAnalyze = () => {
-    if (stage === 'idle' || !fileName) return
-    setStage('analyzed')
-    setHistory((prev) => [
-      {
-        fileName,
-        category: MOCK_ANALYSIS.category,
-        confidence: MOCK_ANALYSIS.confidence,
-        timestamp: new Date().toLocaleString('es-CO'),
-      },
-      ...prev,
-    ])
-    setActiveTab('resultado')
+  const handleAnalyze = async () => {
+    if (!file) return
+
+    setStage('analyzing')
+    setError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(`${API_BASE_URL}/v1/predictions/pdf`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail ?? `Error ${response.status} al analizar el documento`)
+      }
+
+      const data: PredictionResponse = await response.json()
+      setResult(data)
+      setStage('analyzed')
+      setHistory((prev) => [data, ...prev])
+      setActiveTab('resultado')
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'No se pudo conectar con la API. ¿Está corriendo en http://localhost:8000?',
+      )
+      setStage('loaded')
+    }
+  }
+
+  const loadHistory = async () => {
+    setHistoryLoading(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/predictions?limit=20`)
+      if (!response.ok) throw new Error('No se pudo cargar el historial')
+      const data = await response.json()
+      setHistory(data.items ?? [])
+    } catch {
+      // se conserva el historial local si la API no responde
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const handleClearHistory = async () => {
+    if (history.length === 0) return
+    setClearingHistory(true)
+    try {
+      await Promise.all(
+        history.map((entry) =>
+          fetch(`${API_BASE_URL}/v1/predictions/${entry.prediction_id}`, {
+            method: 'DELETE',
+          }),
+        ),
+      )
+      setHistory([])
+    } catch {
+      // si alguna eliminación falla, se recarga para reflejar el estado real
+      await loadHistory()
+    } finally {
+      setClearingHistory(false)
+    }
+  }
+
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab)
+    if (tab === 'historial') loadHistory()
   }
 
   const tabs: { id: Tab; label: string }[] = [
@@ -114,7 +176,7 @@ function App() {
           <button
             key={tab.id}
             type="button"
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => handleTabChange(tab.id)}
             className={`border-b-2 pb-3 pt-4 text-sm font-semibold transition-colors ${
               activeTab === tab.id
                 ? 'border-emerald-400 text-emerald-400'
@@ -131,7 +193,7 @@ function App() {
           <div className="mx-auto max-w-xl">
             <h2 className="text-xl font-semibold text-white">Selecciona los documentos</h2>
             <p className="mt-1 text-sm text-neutral-500">
-              Formatos aceptados: PDF · Tamaño máx. 20 MB por archivo
+              Formatos aceptados: PDF · Tamaño máx. 50 MB por archivo
             </p>
 
             <label
@@ -142,10 +204,10 @@ function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-6 4h6M9 9h1M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
               </svg>
               <p className="font-medium text-white">
-                {fileName ?? 'Arrastra documentos PDF aquí'}
+                {file?.name ?? 'Arrastra documentos PDF aquí'}
               </p>
               <p className="text-sm text-neutral-500">
-                {fileName ? 'Archivo listo' : 'o haz clic para seleccionar'}
+                {file ? 'Archivo listo' : 'o haz clic para seleccionar'}
               </p>
               <input
                 id="pdf-upload"
@@ -156,19 +218,21 @@ function App() {
               />
             </label>
 
-            {fileName && stage !== 'analyzed' && (
-              <div className="mt-6 flex justify-center">
+            {file && stage !== 'analyzed' && (
+              <div className="mt-6 flex flex-col items-center gap-3">
                 <button
                   type="button"
                   onClick={handleAnalyze}
-                  className="rounded-full bg-[#FFD400] px-6 py-2 text-sm font-semibold text-black shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl"
+                  disabled={stage === 'analyzing'}
+                  className="rounded-full bg-[#FFD400] px-6 py-2 text-sm font-semibold text-black shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Analizar
+                  {stage === 'analyzing' ? 'Analizando…' : 'Analizar'}
                 </button>
+                {error && <p className="max-w-sm text-center text-sm text-red-400">{error}</p>}
               </div>
             )}
 
-            {!fileName && (
+            {!file && (
               <p className="mt-8 flex flex-col items-center gap-1 text-center text-blue-400">
                 <span aria-hidden className="animate-bounce text-xl">↑</span>
                 <span className="animate-pulse">Los archivos aparecerán aquí</span>
@@ -179,7 +243,7 @@ function App() {
 
         {activeTab === 'resultado' && (
           <div className="mx-auto max-w-xl space-y-5">
-            {stage !== 'analyzed' ? (
+            {!result ? (
               <p className="text-center text-neutral-500">
                 Todavía no se ha analizado ningún documento. Ve a la pestaña "Ingresar" para comenzar.
               </p>
@@ -191,43 +255,29 @@ function App() {
                   </p>
                   <div className="flex items-center justify-between gap-4">
                     <span className="inline-flex items-center gap-2 rounded-full bg-violet-500/15 px-4 py-2 text-sm font-semibold text-violet-300">
-                      {CATEGORY_ICONS[MOCK_ANALYSIS.category]} {MOCK_ANALYSIS.category}
+                      {CATEGORY_ICONS[result.predicted_category] ?? '📄'} {result.predicted_category}
                     </span>
-                    <ConfidenceGauge percent={MOCK_ANALYSIS.confidence} />
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                    Palabras clave detectadas
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {MOCK_ANALYSIS.keywords.map((keyword) => (
-                      <span
-                        key={keyword}
-                        className="rounded-full bg-violet-500/15 px-3 py-1 text-xs font-medium text-violet-300"
-                      >
-                        {keyword}
-                      </span>
-                    ))}
+                    <ConfidenceGauge percent={Math.round(result.confidence * 100)} />
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
                   <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                    Rasgos con mayor peso predictivo
+                    Top 3 categorías más probables
                   </p>
                   <div className="space-y-3">
-                    {MOCK_ANALYSIS.features.map((feature) => (
-                      <div key={feature.label}>
+                    {result.top_3.map((prediction) => (
+                      <div key={prediction.label}>
                         <div className="mb-1 flex justify-between text-xs text-neutral-400">
-                          <span>{feature.label}</span>
-                          <span>{feature.percent}%</span>
+                          <span>
+                            {CATEGORY_ICONS[prediction.category] ?? '📄'} {prediction.category}
+                          </span>
+                          <span>{(prediction.probability * 100).toFixed(1)}%</span>
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-800">
                           <div
                             className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-400"
-                            style={{ width: `${feature.percent}%` }}
+                            style={{ width: `${prediction.probability * 100}%` }}
                           />
                         </div>
                       </div>
@@ -237,9 +287,22 @@ function App() {
 
                 <div className="rounded-2xl border border-emerald-900/50 bg-emerald-500/5 p-6">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-400">
-                    Trazabilidad — razonamiento del modelo
+                    Trazabilidad
                   </p>
-                  <p className="text-sm leading-relaxed text-neutral-300">{MOCK_ANALYSIS.reasoning}</p>
+                  <div className="space-y-1 text-sm text-neutral-300">
+                    <p>
+                      <span className="text-neutral-500">ID de predicción: </span>
+                      <span className="font-mono text-xs">{result.prediction_id}</span>
+                    </p>
+                    <p>
+                      <span className="text-neutral-500">Archivo: </span>
+                      {result.file_name ?? '—'}
+                    </p>
+                    <p>
+                      <span className="text-neutral-500">Fecha: </span>
+                      {new Date(result.created_at).toLocaleString('es-CO')}
+                    </p>
+                  </div>
                 </div>
               </>
             )}
@@ -248,20 +311,38 @@ function App() {
 
         {activeTab === 'historial' && (
           <div className="mx-auto max-w-xl space-y-3">
-            {history.length === 0 ? (
+            {history.length > 0 && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleClearHistory}
+                  disabled={clearingHistory}
+                  className="rounded-full border border-red-900/50 bg-red-500/10 px-4 py-1.5 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {clearingHistory ? 'Borrando…' : 'Borrar historial'}
+                </button>
+              </div>
+            )}
+
+            {historyLoading ? (
+              <p className="text-center text-neutral-500">Cargando historial…</p>
+            ) : history.length === 0 ? (
               <p className="text-center text-neutral-500">Aún no hay análisis registrados.</p>
             ) : (
-              history.map((entry, index) => (
+              history.map((entry) => (
                 <div
-                  key={`${entry.fileName}-${index}`}
+                  key={entry.prediction_id}
                   className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-3"
                 >
                   <div>
-                    <p className="text-sm font-medium text-white">{entry.fileName}</p>
-                    <p className="text-xs text-neutral-500">{entry.timestamp}</p>
+                    <p className="text-sm font-medium text-white">{entry.file_name ?? 'Texto directo'}</p>
+                    <p className="text-xs text-neutral-500">
+                      {new Date(entry.created_at).toLocaleString('es-CO')}
+                    </p>
                   </div>
                   <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-300">
-                    {CATEGORY_ICONS[entry.category]} {entry.category} · {entry.confidence}%
+                    {CATEGORY_ICONS[entry.predicted_category] ?? '📄'} {entry.predicted_category} ·{' '}
+                    {(entry.confidence * 100).toFixed(0)}%
                   </span>
                 </div>
               ))
