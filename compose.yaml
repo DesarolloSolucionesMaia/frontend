@@ -1,0 +1,11 @@
+services:
+  frontend:
+    build: .
+    ports:
+      - "8080:80"
+    environment:
+      MODEL_API_HOST: host.docker.internal
+      MODEL_API_PORT: "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

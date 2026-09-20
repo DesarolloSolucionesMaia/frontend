@@ -1,32 +1,65 @@
-# React + TypeScript + Vite
+# Tablero del clasificador de noticias
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Frontend React, TypeScript y Vite para cargar noticias en PDF, consultar la
+predicción del modelo y administrar el historial persistente del API.
 
-Currently, two official plugins are available:
+## Desarrollo local
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Con el API ejecutándose en `http://localhost:8000`:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm ci
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Vite publica el tablero en `http://localhost:5173` y redirige las solicitudes
+de `/api` al API local.
+
+## Validaciones
+
+```powershell
+npm run lint
+npm run build
+```
+
+## Docker
+
+La imagen usa una compilación multi-stage con Node.js 22 y sirve los archivos
+estáticos mediante Nginx. Nginx también funciona como proxy inverso: el
+navegador llama a `/api` y el contenedor reenvía la solicitud al modelo.
+
+Con el API disponible en el puerto `8000` del host:
+
+```powershell
+docker compose up --build -d
+```
+
+Abrir:
+
+```text
+http://localhost:8080
+```
+
+Comprobar el contenedor y consultar sus registros:
+
+```powershell
+docker compose ps
+docker compose logs -f frontend
+```
+
+Detenerlo:
+
+```powershell
+docker compose down
+```
+
+### Variables del contenedor
+
+| Variable | Predeterminado | Descripción |
+|---|---|---|
+| `MODEL_API_HOST` | `host.docker.internal` | Host o nombre DNS del contenedor del API. |
+| `MODEL_API_PORT` | `8000` | Puerto interno del API. |
+
+Cuando frontend y API estén en la misma red Docker, se debe usar el nombre del
+servicio del modelo como `MODEL_API_HOST`. Esta configuración se completará en
+el Compose conjunto para EC2.

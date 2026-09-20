@@ -3,7 +3,7 @@ import { useState } from 'react'
 type Stage = 'idle' | 'loaded' | 'analyzing' | 'analyzed'
 type Tab = 'ingresar' | 'resultado' | 'historial'
 
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = '/api'
 
 interface RankedPrediction {
   label: number
@@ -113,7 +113,7 @@ function App() {
       setError(
         err instanceof Error
           ? err.message
-          : 'No se pudo conectar con la API. ¿Está corriendo en http://localhost:8000?',
+          : 'No se pudo conectar con la API. Verifica que el servicio esté disponible.',
       )
       setStage('loaded')
     }
